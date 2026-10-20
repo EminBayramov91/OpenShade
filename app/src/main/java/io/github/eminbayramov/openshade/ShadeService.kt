@@ -60,7 +60,10 @@ class ShadeService : AccessibilityService(), ShadeActions {
         addTrigger()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        // While our panel is open, any stock shade that slipped through is closed again.
+        if (panelRoot != null && event?.packageName == SYSTEM_UI) collapseSystemShade()
+    }
 
     override fun onInterrupt() = Unit
 
@@ -79,8 +82,8 @@ class ShadeService : AccessibilityService(), ShadeActions {
         val view = View(this)
         var startY = 0f
         var opened = false
-        // XOS steals top-edge swipes after roughly 70 px, so open well before that.
-        val threshold = 4 * resources.displayMetrics.density
+        // XOS steals top-edge swipes after roughly 70 px, so open on the first downward move.
+        val threshold = 1 * resources.displayMetrics.density
 
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
@@ -96,8 +99,10 @@ class ShadeService : AccessibilityService(), ShadeActions {
             true
         }
 
+        // Only the right half is covered, matching the split layout many ROMs use:
+        // swiping on the left still opens the stock notification shade.
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
+            resources.displayMetrics.widthPixels / 2,
             statusBarHeight(),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -105,7 +110,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT,
         ).apply {
-            gravity = Gravity.TOP
+            gravity = Gravity.TOP or Gravity.END
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
         windowManager.addView(view, params)
@@ -164,17 +169,18 @@ class ShadeService : AccessibilityService(), ShadeActions {
         panelLifecycle = lifecycle
         panelVisibility.targetState = true
         trigger?.postDelayed(refresher, REFRESH_MS)
+        // Some ROMs (XOS among them) intercept the same swipe and start opening their own
+        // shade underneath ours. Collapse it right away and a few more times while the
+        // gesture settles; onAccessibilityEvent catches anything later.
         collapseSystemShade()
+        for (delay in longArrayOf(50, 150, 300, 600, 1000)) {
+            trigger?.postDelayed(::collapseSystemShade, delay)
+        }
     }
 
-    /**
-     * Some ROMs (XOS among them) intercept the same swipe and also start opening their
-     * own shade underneath ours. Collapse it a few times while the gesture settles.
-     */
     private fun collapseSystemShade() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        for (delay in longArrayOf(100, 300, 600)) {
-            trigger?.postDelayed({ performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE) }, delay)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
         }
     }
 
@@ -239,5 +245,6 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     private companion object {
         const val REFRESH_MS = 1000L
+        const val SYSTEM_UI = "com.android.systemui"
     }
 }
