@@ -53,7 +53,7 @@ Open the OpenShade app to change:
    - allow *Do Not Disturb* access.
 
 On Android 13 and newer, if the accessibility toggle is greyed out, open
-*Settings â†’ Apps â†’ OpenShade â†’ â‹® â†’ Allow restricted settings* first.
+*Settings → Apps → OpenShade → ⋮ → Allow restricted settings* first.
 
 ## Permissions
 
