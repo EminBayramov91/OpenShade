@@ -1,6 +1,7 @@
 package io.github.eminbayramov.openshade.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
@@ -101,7 +102,7 @@ fun ShadePanel(
 private fun PanelSurface(state: ShadeState, opacity: Float, actions: ShadeActions) {
     val colors = MaterialTheme.colorScheme
     // Fades from fully opaque (while the opening swipe is in progress) to the chosen opacity.
-    val backgroundAlpha by animateFloatAsState(opacity, tween(300), label = "panelOpacity")
+    val backgroundAlpha by animateFloatAsState(opacity, tween(500, easing = FastOutSlowInEasing), label = "panelOpacity")
     Column(
         Modifier
             .fillMaxSize()

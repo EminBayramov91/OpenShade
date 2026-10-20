@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">OpenShade</string>
-    <string name="accessibility_description">OpenShade draws a Material You quick settings panel when you swipe down from the top edge of the screen. It does not read screen content or collect any data.</string>
+    <string name="accessibility_description">OpenShade draws a Material You quick settings panel when you swipe down from the top edge of the screen. It checks which system windows are open so it can hide the stock shade, but never reads their contents, and collects no data.</string>
 </resources>

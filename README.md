@@ -1,4 +1,4 @@
-﻿# OpenShade
+# OpenShade
 
 A Material You quick settings shade for Android phones whose stock shade you don't like.
 
@@ -59,11 +59,11 @@ On Android 13 and newer, if the accessibility toggle is greyed out, open
 
 | Permission | Why |
 |---|---|
-| Accessibility service | Detects the swipe at the top edge and draws the panel above other apps |
+| Accessibility service | Detects the swipe at the top edge, draws the panel above other apps and checks whether the stock shade window is on screen (window type and size only, never its contents) |
 | Modify system settings | Brightness slider and auto-rotate tile |
 | Do Not Disturb access | Do Not Disturb tile |
 
-OpenShade does not read screen content, has no internet permission and collects no data.
+OpenShade never reads the contents of other windows, has no internet permission and collects no data.
 
 ## Building
 

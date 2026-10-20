@@ -9,12 +9,17 @@ import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.SystemClock
+import android.animation.ValueAnimator
+import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
 import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.PathInterpolator
 import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
 import androidx.compose.animation.core.MutableTransitionState
@@ -51,9 +56,27 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     private val panelVisibility = MutableTransitionState(false)
 
-    // While the opening swipe is in progress the stock shade may be sliding in underneath,
-    // so the panel stays fully opaque until shortly after the finger is lifted.
-    private val fingerDown = mutableStateOf(false)
+    // While the stock shade is visible underneath (it follows the finger until it is
+    // lifted), the panel stays fully opaque; once it is gone the panel fades to the
+    // chosen opacity and the blur fades in.
+    private val covering = mutableStateOf(false)
+    private var gestureEndedAt = 0L
+    private var clearPolls = 0
+    private var blurAnimator: ValueAnimator? = null
+
+    private val coverWatcher = object : Runnable {
+        override fun run() {
+            if (!panelShown || !covering.value) return
+            if (stockShadeVisible()) {
+                clearPolls = 0
+                collapseSystemShade()
+            } else {
+                clearPolls++
+            }
+            val released = gestureEndedAt != 0L && SystemClock.uptimeMillis() - gestureEndedAt >= REVEAL_DELAY_MS
+            if (released && clearPolls >= 2) reveal() else trigger?.postDelayed(this, COVER_POLL_MS)
+        }
+    }
     private val state = mutableStateOf(emptyState())
 
     private val refresher = object : Runnable {
@@ -137,18 +160,14 @@ class ShadeService : AccessibilityService(), ShadeActions {
                 MotionEvent.ACTION_DOWN -> {
                     startY = event.rawY
                     moved = false
-                    fingerDown.value = true
                     showPanel()
                 }
                 MotionEvent.ACTION_MOVE -> if (event.rawY - startY > threshold) moved = true
+                // CANCEL arrives when XOS takes over the gesture; the finger may still be
+                // down, which is why the cover watcher looks at the stock shade itself.
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (!moved && event.actionMasked == MotionEvent.ACTION_UP) onDismiss()
-                    // The stock shade follows the finger until it is lifted, so collapse it
-                    // again now and keep the panel opaque a moment longer while it closes.
-                    for (delay in longArrayOf(0, 100, 250, 500, 900)) {
-                        view.postDelayed(::collapseSystemShade, delay)
-                    }
-                    view.postDelayed({ fingerDown.value = false }, OPAQUE_AFTER_RELEASE_MS)
+                    gestureEndedAt = SystemClock.uptimeMillis()
                 }
             }
             true
@@ -202,7 +221,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
         val compose = ComposeView(this).apply {
             setContent {
                 val look = appearance.value
-                ShadePanel(panelVisibility, state.value, look.colors, if (fingerDown.value) 1f else look.opacity, this@ShadeService)
+                ShadePanel(panelVisibility, state.value, look.colors, if (covering.value) 1f else look.opacity, this@ShadeService)
                 // Hide the window again once the exit animation has finished.
                 if (panelVisibility.isIdle && !panelVisibility.currentState && !panelVisibility.targetState) {
                     post { hidePanelWindow() }
@@ -239,16 +258,41 @@ class ShadeService : AccessibilityService(), ShadeActions {
         }
         panelShown = true
         refresh()
-        applyPanelFlags(shown = true)
+        // Start opaque and without blur; reveal() fades both in once the stock shade,
+        // which XOS opens from the same swipe, is gone.
+        covering.value = true
+        gestureEndedAt = 0L
+        clearPolls = 0
+        blurAnimator?.cancel()
+        applyPanelFlags(shown = true, blurRadius = 0)
         root.visibility = View.VISIBLE
         panelVisibility.targetState = true
         trigger?.postDelayed(refresher, REFRESH_MS)
-        // Some ROMs (XOS among them) intercept the same swipe and start opening their own
-        // shade underneath ours. Collapse it right away and a few more times while the
-        // gesture settles; onAccessibilityEvent catches anything later.
         collapseSystemShade()
-        for (delay in longArrayOf(50, 150, 300, 600, 1000)) {
-            trigger?.postDelayed(::collapseSystemShade, delay)
+        trigger?.postDelayed(coverWatcher, COVER_POLL_MS)
+    }
+
+    /** True while a large System UI window (the stock shade) is on screen. */
+    private fun stockShadeVisible(): Boolean {
+        val minHeight = resources.displayMetrics.heightPixels / 3
+        val bounds = Rect()
+        return windows.any { window ->
+            window.type == AccessibilityWindowInfo.TYPE_SYSTEM &&
+                bounds.also(window::getBoundsInScreen).height() > minHeight
+        }
+    }
+
+    /** Fades the background to the chosen opacity and animates the blur in with it. */
+    private fun reveal() {
+        covering.value = false
+        if (!appearance.value.blur) return
+        val target = (BLUR_DP * resources.displayMetrics.density).toInt()
+        blurAnimator?.cancel()
+        blurAnimator = ValueAnimator.ofInt(0, target).apply {
+            duration = REVEAL_MS
+            interpolator = PathInterpolator(0.4f, 0f, 0.2f, 1f)
+            addUpdateListener { if (panelShown) applyPanelFlags(shown = true, blurRadius = it.animatedValue as Int) }
+            start()
         }
     }
 
@@ -263,19 +307,30 @@ class ShadeService : AccessibilityService(), ShadeActions {
         if (!panelShown) return
         panelShown = false
         trigger?.removeCallbacks(refresher)
+        trigger?.removeCallbacks(coverWatcher)
+        blurAnimator?.cancel()
         root.visibility = View.INVISIBLE
         applyPanelFlags(shown = false)
     }
 
-    /** Switches the window between interactive (and optionally blurred) and pass-through. */
-    private fun applyPanelFlags(shown: Boolean) {
+    /**
+     * Switches the window between interactive (and optionally blurred) and pass-through.
+     * [blurRadius] defaults to the full radius, or none while the panel is still covering.
+     */
+    private fun applyPanelFlags(shown: Boolean, blurRadius: Int? = null) {
         val root = panelRoot ?: return
         val params = panelParams ?: return
         val blur = shown && appearance.value.blur
         params.flags = (if (shown) SHOWN_FLAGS else HIDDEN_FLAGS) or
             (if (blur) WindowManager.LayoutParams.FLAG_BLUR_BEHIND else 0)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            params.blurBehindRadius = if (blur) (BLUR_DP * resources.displayMetrics.density).toInt() else 0
+            val full = (BLUR_DP * resources.displayMetrics.density).toInt()
+            params.blurBehindRadius = when {
+                !blur -> 0
+                blurRadius != null -> blurRadius
+                covering.value -> 0
+                else -> full
+            }
         }
         windowManager.updateViewLayout(root, params)
     }
@@ -344,7 +399,9 @@ class ShadeService : AccessibilityService(), ShadeActions {
         const val REFRESH_MS = 1000L
         const val SYSTEM_UI = "com.android.systemui"
         const val BLUR_DP = 24
-        const val OPAQUE_AFTER_RELEASE_MS = 400L
+        const val COVER_POLL_MS = 100L
+        const val REVEAL_DELAY_MS = 250L
+        const val REVEAL_MS = 500L
 
         const val SHOWN_FLAGS =
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
