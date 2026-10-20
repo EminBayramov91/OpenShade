@@ -2,10 +2,13 @@
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
+import android.app.WallpaperManager
 import android.content.Intent
+import android.content.SharedPreferences
+import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
-import android.graphics.PixelFormat
+import android.os.Handler
 import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
@@ -15,6 +18,8 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import io.github.eminbayramov.openshade.tiles.BrightnessController
@@ -29,8 +34,8 @@ import java.util.Locale
 
 /**
  * Hosts two overlay windows:
- *  - a thin, invisible trigger strip along the top edge that detects a downward swipe;
- *  - the full-screen shade panel, added only while it is open.
+ *  - a thin, invisible trigger strip along the right half of the top edge;
+ *  - the full-screen shade panel, created once and toggled between hidden and shown.
  */
 class ShadeService : AccessibilityService(), ShadeActions {
 
@@ -59,9 +64,30 @@ class ShadeService : AccessibilityService(), ShadeActions {
         windowManager = getSystemService(WindowManager::class.java)
         tiles = TileController(this)
         brightness = BrightnessController(this)
+        settings = AppSettings(this)
+        settings.registerListener(settingsListener)
+        WallpaperManager.getInstance(this).addOnColorsChangedListener(wallpaperListener, Handler(mainLooper))
+        updateAppearance()
         refresh()
         addPanel()
         addTrigger()
+    }
+
+    private lateinit var settings: AppSettings
+    // Replaced in onServiceConnected; the service has no context yet at construction.
+    private val appearance = mutableStateOf(Appearance(darkColorScheme(), 0.85f, false))
+
+    private data class Appearance(val colors: ColorScheme, val opacity: Float, val blur: Boolean)
+
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateAppearance() }
+    private val wallpaperListener = WallpaperManager.OnColorsChangedListener { _, which ->
+        if (which and WallpaperManager.FLAG_SYSTEM != 0) updateAppearance()
+    }
+
+    private fun updateAppearance() {
+        val blur = settings.blur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && windowManager.isCrossWindowBlurEnabled
+        appearance.value = Appearance(shadeColors(this, settings.colorSource), settings.opacity, blur)
+        if (panelShown) applyPanelFlags(shown = true)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -72,6 +98,10 @@ class ShadeService : AccessibilityService(), ShadeActions {
     override fun onInterrupt() = Unit
 
     override fun onDestroy() {
+        if (::settings.isInitialized) {
+            settings.unregisterListener(settingsListener)
+            WallpaperManager.getInstance(this).removeOnColorsChangedListener(wallpaperListener)
+        }
         removePanel()
         trigger?.let { windowManager.removeView(it) }
         trigger = null
@@ -85,29 +115,31 @@ class ShadeService : AccessibilityService(), ShadeActions {
     private fun addTrigger() {
         val view = View(this)
         var startY = 0f
-        var opened = false
-        // XOS steals top-edge swipes after roughly 70 px, so open on the first downward move.
-        val threshold = 1 * resources.displayMetrics.density
+        var moved = false
+        val threshold = 8 * resources.displayMetrics.density
 
+        // The stock shade on XOS reacts to the same touch in parallel and cannot be
+        // stopped, so the panel is shown on touch-down to cover it from the first frame.
+        // A plain tap without a downward swipe closes it again.
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     startY = event.rawY
-                    opened = false
-                }
-                MotionEvent.ACTION_MOVE -> if (!opened && event.rawY - startY > threshold) {
-                    opened = true
+                    moved = false
                     showPanel()
                 }
+                MotionEvent.ACTION_MOVE -> if (event.rawY - startY > threshold) moved = true
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (!moved && event.actionMasked == MotionEvent.ACTION_UP) onDismiss()
             }
             true
         }
 
         // Only the right half is covered, matching the split layout many ROMs use:
-        // swiping on the left still opens the stock notification shade.
+        // swiping on the left still opens the stock notification shade. The strip is a
+        // little taller than the status bar to catch swipes that start slightly lower.
         val params = WindowManager.LayoutParams(
             resources.displayMetrics.widthPixels / 2,
-            statusBarHeight(),
+            statusBarHeight() + (12 * resources.displayMetrics.density).toInt(),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -149,7 +181,8 @@ class ShadeService : AccessibilityService(), ShadeActions {
         }
         val compose = ComposeView(this).apply {
             setContent {
-                ShadePanel(panelVisibility, state.value, shadeColors(context), this@ShadeService)
+                val look = appearance.value
+                ShadePanel(panelVisibility, state.value, look.colors, look.opacity, this@ShadeService)
                 // Hide the window again once the exit animation has finished.
                 if (panelVisibility.isIdle && !panelVisibility.currentState && !panelVisibility.targetState) {
                     post { hidePanelWindow() }
@@ -179,13 +212,14 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     private fun showPanel() {
         val root = panelRoot ?: return
-        if (panelShown) return
+        if (panelShown) {
+            // Still fading out from a previous dismiss: just reverse the animation.
+            panelVisibility.targetState = true
+            return
+        }
         panelShown = true
         refresh()
-        panelParams?.let {
-            it.flags = SHOWN_FLAGS
-            windowManager.updateViewLayout(root, it)
-        }
+        applyPanelFlags(shown = true)
         root.visibility = View.VISIBLE
         panelVisibility.targetState = true
         trigger?.postDelayed(refresher, REFRESH_MS)
@@ -210,10 +244,20 @@ class ShadeService : AccessibilityService(), ShadeActions {
         panelShown = false
         trigger?.removeCallbacks(refresher)
         root.visibility = View.INVISIBLE
-        panelParams?.let {
-            it.flags = HIDDEN_FLAGS
-            windowManager.updateViewLayout(root, it)
+        applyPanelFlags(shown = false)
+    }
+
+    /** Switches the window between interactive (and optionally blurred) and pass-through. */
+    private fun applyPanelFlags(shown: Boolean) {
+        val root = panelRoot ?: return
+        val params = panelParams ?: return
+        val blur = shown && appearance.value.blur
+        params.flags = (if (shown) SHOWN_FLAGS else HIDDEN_FLAGS) or
+            (if (blur) WindowManager.LayoutParams.FLAG_BLUR_BEHIND else 0)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            params.blurBehindRadius = if (blur) (BLUR_DP * resources.displayMetrics.density).toInt() else 0
         }
+        windowManager.updateViewLayout(root, params)
     }
 
     private fun removePanel() {
@@ -279,6 +323,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
     private companion object {
         const val REFRESH_MS = 1000L
         const val SYSTEM_UI = "com.android.systemui"
+        const val BLUR_DP = 24
 
         const val SHOWN_FLAGS =
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS

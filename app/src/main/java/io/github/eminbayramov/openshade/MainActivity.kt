@@ -4,8 +4,20 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.view.WindowManager
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import kotlin.math.roundToInt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -51,32 +63,113 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent {
-            MaterialTheme(colorScheme = shadeColors(LocalContext.current)) {
-                SetupScreen()
+        setContent { SetupScreen() }
+    }
+
+    @Composable
+    private fun SetupScreen() {
+        val settings = remember { AppSettings(this) }
+        var colorSource by remember { mutableStateOf(settings.colorSource) }
+        var opacity by remember { mutableFloatStateOf(settings.opacity) }
+        var blur by remember { mutableStateOf(settings.blur) }
+        // Bumped on every resume so the checklist reflects permissions granted in Settings.
+        var resumeCount by remember { mutableIntStateOf(0) }
+        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumeCount++ }
+
+        MaterialTheme(colorScheme = shadeColors(LocalContext.current, colorSource)) {
+            val colors = MaterialTheme.colorScheme
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.surface)
+                    .verticalScroll(rememberScrollState())
+                    .safeDrawingPadding()
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                key(resumeCount) { Checklist() }
+                Spacer(Modifier.height(8.dp))
+                Appearance(
+                    colorSource = colorSource,
+                    onColorSource = { colorSource = it; settings.colorSource = it },
+                    opacity = opacity,
+                    onOpacity = { opacity = it; settings.opacity = it },
+                    blur = blur,
+                    onBlur = { blur = it; settings.blur = it },
+                )
             }
         }
     }
 
     @Composable
-    private fun SetupScreen() {
-        // Bumped on every resume so the checklist reflects permissions granted in Settings.
-        var resumeCount by remember { mutableIntStateOf(0) }
-        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumeCount++ }
-        key(resumeCount) { Checklist() }
+    private fun Appearance(
+        colorSource: AppSettings.ColorSource,
+        onColorSource: (AppSettings.ColorSource) -> Unit,
+        opacity: Float,
+        onOpacity: (Float) -> Unit,
+        blur: Boolean,
+        onBlur: (Boolean) -> Unit,
+    ) {
+        val colors = MaterialTheme.colorScheme
+        Text("Appearance", color = colors.onSurface, fontSize = 22.sp, fontWeight = FontWeight.Medium)
+        Card {
+            Text("Colors", color = colors.onSurface, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.height(10.dp))
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                val options = listOf(
+                    AppSettings.ColorSource.WALLPAPER to "Wallpaper",
+                    AppSettings.ColorSource.SYSTEM to "System theme",
+                )
+                options.forEachIndexed { index, (source, label) ->
+                    SegmentedButton(
+                        selected = colorSource == source,
+                        onClick = { onColorSource(source) },
+                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                    ) { Text(label) }
+                }
+            }
+        }
+        Card {
+            Text(
+                "Background opacity: ${(opacity * 100).roundToInt()}%",
+                color = colors.onSurface,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Slider(value = opacity, onValueChange = onOpacity, valueRange = AppSettings.MIN_OPACITY..1f)
+        }
+        Card {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Blur behind the panel", color = colors.onSurface, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                        getSystemService(WindowManager::class.java).isCrossWindowBlurEnabled
+                    Text(
+                        if (supported) "Frosted-glass look with a lower opacity." else "Not supported on this device.",
+                        color = colors.onSurfaceVariant,
+                        fontSize = 14.sp,
+                    )
+                }
+                Switch(checked = blur, onCheckedChange = onBlur)
+            }
+        }
+    }
+
+    @Composable
+    private fun Card(content: @Composable () -> Unit) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .padding(20.dp),
+        ) { content() }
     }
 
     @Composable
     private fun Checklist() {
         val colors = MaterialTheme.colorScheme
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(colors.surface)
-                .safeDrawingPadding()
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("OpenShade", color = colors.onSurface, fontSize = 34.sp, fontWeight = FontWeight.Medium)
             Text(
                 "A Material You quick settings shade. Swipe down from the top edge of the screen to open it.",

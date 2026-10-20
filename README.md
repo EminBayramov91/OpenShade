@@ -1,4 +1,4 @@
-# OpenShade
+﻿# OpenShade
 
 A Material You quick settings shade for Android phones whose stock shade you don't like.
 
@@ -10,12 +10,15 @@ unlocking the bootloader**.
 
 ## Features
 
-- Swipe down from the status bar to open, swipe up, tap outside or press Back to close
+- Swipe down from the right half of the status bar to open; the left half still opens the stock notification shade
+- Swipe up, tap empty space or press Back to close
 - Clock and date header with a shortcut to Settings
 - Brightness slider with an adaptive-brightness toggle
 - Tiles: Internet, Bluetooth, Mobile data, Flashlight, Do Not Disturb, Auto-rotate, Airplane mode
 - Long-press a tile to open its settings page
-- Colors follow the system Material You palette (Android 12+)
+- Colors generated from your wallpaper (Material You Tonal Spot), or taken from the system theme
+- Translucent full-height background with optional blur (on devices that support cross-window blur)
+- Adaptive icon with a monochrome layer for themed icons
 
 ## Status
 
@@ -31,8 +34,15 @@ directly, so those tiles currently open the matching system panel. Direct toggle
 - [ ] Direct Wi-Fi / Bluetooth / mobile data toggles via Shizuku
 - [ ] Two-stage panel: compact row of tiles, then the full grid
 - [ ] Tile editor (reorder, add, remove)
-- [ ] Palette taken directly from the wallpaper
 - [ ] Media player controls
+
+## Customization
+
+Open the OpenShade app to change:
+
+- **Colors:** wallpaper or system theme
+- **Background opacity:** 40-100%
+- **Blur behind the panel**
 
 ## Installation
 
@@ -43,7 +53,7 @@ directly, so those tiles currently open the matching system panel. Direct toggle
    - allow *Do Not Disturb* access.
 
 On Android 13 and newer, if the accessibility toggle is greyed out, open
-*Settings → Apps → OpenShade → ⋮ → Allow restricted settings* first.
+*Settings â†’ Apps â†’ OpenShade â†’ â‹® â†’ Allow restricted settings* first.
 
 ## Permissions
 

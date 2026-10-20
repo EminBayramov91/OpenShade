@@ -71,49 +71,40 @@ interface ShadeActions {
     fun onDismiss()
 }
 
+/**
+ * Full-height panel. The background uses the surface color at [opacity]; when the
+ * window blurs what is behind it, a lower opacity gives a frosted-glass look.
+ */
 @Composable
 fun ShadePanel(
     visibility: MutableTransitionState<Boolean>,
     state: ShadeState,
     colors: ColorScheme,
+    opacity: Float,
     actions: ShadeActions,
 ) {
     MaterialTheme(colorScheme = colors) {
-        Box(Modifier.fillMaxSize()) {
-            // Scrim: tapping outside the panel closes it.
-            AnimatedVisibility(visibility, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.7f))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = actions::onDismiss,
-                        )
-                )
-            }
-            AnimatedVisibility(
-                visibility,
-                enter = slideInVertically(tween(200)) { -it / 3 } + fadeIn(tween(120)),
-                exit = slideOutVertically(tween(220)) { -it } + fadeOut(tween(220)),
-            ) {
-                PanelSurface(state, actions)
-            }
+        AnimatedVisibility(
+            visibility,
+            // The panel shows the moment the finger touches the edge, so it has to be
+            // on screen within a frame or two to cover the stock shade.
+            enter = fadeIn(tween(90)) + slideInVertically(tween(160)) { -it / 12 },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(200)) { -it / 6 },
+        ) {
+            PanelSurface(state, opacity, actions)
         }
     }
 }
 
 @Composable
-private fun PanelSurface(state: ShadeState, actions: ShadeActions) {
+private fun PanelSurface(state: ShadeState, opacity: Float, actions: ShadeActions) {
     val colors = MaterialTheme.colorScheme
     Column(
         Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-            .background(colors.surfaceContainer)
-            // Swallow taps so they don't reach the scrim behind the panel.
-            .clickable(remember { MutableInteractionSource() }, indication = null) {}
+            .fillMaxSize()
+            .background(colors.surfaceContainer.copy(alpha = opacity))
+            // Tapping empty space closes the panel, like the stock shade.
+            .clickable(remember { MutableInteractionSource() }, indication = null, onClick = actions::onDismiss)
             // Swipe up anywhere on the panel to close it.
             .pointerInput(Unit) {
                 var total = 0f
@@ -132,7 +123,7 @@ private fun PanelSurface(state: ShadeState, actions: ShadeActions) {
         BrightnessSlider(state.brightness, state.autoBrightness, actions)
         Spacer(Modifier.height(16.dp))
         TileGrid(state.tiles, actions)
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.weight(1f))
         Box(
             Modifier
                 .align(Alignment.CenterHorizontally)
