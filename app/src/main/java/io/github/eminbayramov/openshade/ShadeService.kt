@@ -98,12 +98,23 @@ class ShadeService : AccessibilityService(), ShadeActions {
         WallpaperManager.getInstance(this).addOnColorsChangedListener(wallpaperListener, Handler(mainLooper))
         updateAppearance()
         Shizuku.addBinderReceivedListenerSticky(shizukuListener)
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
         refresh()
         addPanel()
         addTrigger()
     }
 
-    private val shizukuListener = Shizuku.OnBinderReceivedListener { ShizukuShell.warmUp() }
+    private val shizukuListener = Shizuku.OnBinderReceivedListener { applyStockQuickSettings() }
+
+    // Access is usually granted from the setup screen after the service is already running.
+    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
+        applyStockQuickSettings()
+    }
+
+    /** With Shizuku, the stock quick settings panel is disabled so it never opens under ours. */
+    private fun applyStockQuickSettings() {
+        if (::settings.isInitialized) ShizukuShell.setStockQuickSettingsDisabled(settings.hideStockQuickSettings)
+    }
 
     private lateinit var settings: AppSettings
     // Replaced in onServiceConnected; the service has no context yet at construction.
@@ -111,7 +122,10 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     private data class Appearance(val colors: ColorScheme, val opacity: Float, val blur: Boolean)
 
-    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> updateAppearance() }
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        updateAppearance()
+        applyStockQuickSettings()
+    }
     private val wallpaperListener = WallpaperManager.OnColorsChangedListener { _, which ->
         if (which and WallpaperManager.FLAG_SYSTEM != 0) updateAppearance()
     }
@@ -142,6 +156,8 @@ class ShadeService : AccessibilityService(), ShadeActions {
             WallpaperManager.getInstance(this).removeOnColorsChangedListener(wallpaperListener)
         }
         Shizuku.removeBinderReceivedListener(shizukuListener)
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
+        ShizukuShell.setStockQuickSettingsDisabled(false)
         removePanel()
         trigger?.let { windowManager.removeView(it) }
         trigger = null

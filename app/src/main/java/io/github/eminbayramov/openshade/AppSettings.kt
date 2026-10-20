@@ -26,6 +26,11 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_BLUR, true)
         set(value) = prefs.edit().putBoolean(KEY_BLUR, value).apply()
 
+    /** Hide the stock quick settings panel while OpenShade runs (needs Shizuku). */
+    var hideStockQuickSettings: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_STOCK_QS, true)
+        set(value) = prefs.edit().putBoolean(KEY_HIDE_STOCK_QS, value).apply()
+
     fun registerListener(listener: SharedPreferences.OnSharedPreferenceChangeListener) =
         prefs.registerOnSharedPreferenceChangeListener(listener)
 
@@ -37,5 +42,6 @@ class AppSettings(context: Context) {
         private const val KEY_COLORS = "color_source"
         private const val KEY_OPACITY = "opacity"
         private const val KEY_BLUR = "blur"
+        private const val KEY_HIDE_STOCK_QS = "hide_stock_qs"
     }
 }

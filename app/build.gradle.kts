@@ -1,4 +1,4 @@
-﻿plugins {
+plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.eminbayramov.openshade"
         minSdk = 28
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildTypes {
@@ -35,7 +35,6 @@ android {
     }
     buildFeatures {
         compose = true
-        aidl = true
         buildConfig = true
     }
 }
@@ -54,6 +53,8 @@ dependencies {
     // Optional privileged shell for direct Wi-Fi / Bluetooth / data / airplane toggles.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+    // Reaches the hidden IStatusBarService interface used to hide the stock quick settings.
+    implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.savedstate:savedstate-ktx:1.2.1")
