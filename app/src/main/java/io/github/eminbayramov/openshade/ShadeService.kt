@@ -40,14 +40,16 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     private var trigger: View? = null
     private var panelRoot: View? = null
+    private var panelParams: WindowManager.LayoutParams? = null
     private var panelLifecycle: OverlayLifecycleOwner? = null
+    private var panelShown = false
 
     private val panelVisibility = MutableTransitionState(false)
     private val state = mutableStateOf(emptyState())
 
     private val refresher = object : Runnable {
         override fun run() {
-            if (panelRoot == null) return
+            if (!panelShown) return
             refresh()
             trigger?.postDelayed(this, REFRESH_MS)
         }
@@ -57,12 +59,14 @@ class ShadeService : AccessibilityService(), ShadeActions {
         windowManager = getSystemService(WindowManager::class.java)
         tiles = TileController(this)
         brightness = BrightnessController(this)
+        refresh()
+        addPanel()
         addTrigger()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // While our panel is open, any stock shade that slipped through is closed again.
-        if (panelRoot != null && event?.packageName == SYSTEM_UI) collapseSystemShade()
+        if (panelShown && event?.packageName == SYSTEM_UI) collapseSystemShade()
     }
 
     override fun onInterrupt() = Unit
@@ -127,10 +131,12 @@ class ShadeService : AccessibilityService(), ShadeActions {
 
     // region Panel window
 
-    private fun showPanel() {
-        if (panelRoot != null) return
-        refresh()
-
+    /**
+     * The panel window is created once and kept attached but hidden and untouchable.
+     * Building a Compose window on demand takes a few hundred milliseconds, long enough
+     * for the stock shade to appear first, so showing has to be instant.
+     */
+    private fun addPanel() {
         val lifecycle = OverlayLifecycleOwner().also { it.onCreate() }
         val root = object : FrameLayout(this) {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -144,9 +150,9 @@ class ShadeService : AccessibilityService(), ShadeActions {
         val compose = ComposeView(this).apply {
             setContent {
                 ShadePanel(panelVisibility, state.value, shadeColors(context), this@ShadeService)
-                // Remove the window once the exit animation has finished.
+                // Hide the window again once the exit animation has finished.
                 if (panelVisibility.isIdle && !panelVisibility.currentState && !panelVisibility.targetState) {
-                    post { removePanel() }
+                    post { hidePanelWindow() }
                 }
             }
         }
@@ -157,16 +163,30 @@ class ShadeService : AccessibilityService(), ShadeActions {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            HIDDEN_FLAGS,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP
             layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
         }
+        root.visibility = View.INVISIBLE
         windowManager.addView(root, params)
         lifecycle.onResume()
         panelRoot = root
+        panelParams = params
         panelLifecycle = lifecycle
+    }
+
+    private fun showPanel() {
+        val root = panelRoot ?: return
+        if (panelShown) return
+        panelShown = true
+        refresh()
+        panelParams?.let {
+            it.flags = SHOWN_FLAGS
+            windowManager.updateViewLayout(root, it)
+        }
+        root.visibility = View.VISIBLE
         panelVisibility.targetState = true
         trigger?.postDelayed(refresher, REFRESH_MS)
         // Some ROMs (XOS among them) intercept the same swipe and start opening their own
@@ -184,9 +204,22 @@ class ShadeService : AccessibilityService(), ShadeActions {
         }
     }
 
+    private fun hidePanelWindow() {
+        val root = panelRoot ?: return
+        if (!panelShown) return
+        panelShown = false
+        trigger?.removeCallbacks(refresher)
+        root.visibility = View.INVISIBLE
+        panelParams?.let {
+            it.flags = HIDDEN_FLAGS
+            windowManager.updateViewLayout(root, it)
+        }
+    }
+
     private fun removePanel() {
         val root = panelRoot ?: return
         panelRoot = null
+        panelShown = false
         trigger?.removeCallbacks(refresher)
         panelLifecycle?.onDestroy()
         panelLifecycle = null
@@ -246,5 +279,13 @@ class ShadeService : AccessibilityService(), ShadeActions {
     private companion object {
         const val REFRESH_MS = 1000L
         const val SYSTEM_UI = "com.android.systemui"
+
+        const val SHOWN_FLAGS =
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+
+        // Hidden: touches and key events pass straight through to whatever is below.
+        const val HIDDEN_FLAGS = SHOWN_FLAGS or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
     }
 }

@@ -1,4 +1,4 @@
-package io.github.eminbayramov.openshade.ui
+﻿package io.github.eminbayramov.openshade.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
@@ -81,11 +81,11 @@ fun ShadePanel(
     MaterialTheme(colorScheme = colors) {
         Box(Modifier.fillMaxSize()) {
             // Scrim: tapping outside the panel closes it.
-            AnimatedVisibility(visibility, enter = fadeIn(tween(200)), exit = fadeOut(tween(200))) {
+            AnimatedVisibility(visibility, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
+                        .background(Color.Black.copy(alpha = 0.7f))
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -95,7 +95,7 @@ fun ShadePanel(
             }
             AnimatedVisibility(
                 visibility,
-                enter = slideInVertically(tween(280)) { -it } + fadeIn(tween(180)),
+                enter = slideInVertically(tween(200)) { -it / 3 } + fadeIn(tween(120)),
                 exit = slideOutVertically(tween(220)) { -it } + fadeOut(tween(220)),
             ) {
                 PanelSurface(state, actions)
