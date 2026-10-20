@@ -22,16 +22,23 @@ unlocking the bootloader**.
 
 ## Status
 
-Early prototype (v0.1). Tested on an Infinix Zero 30 5G running XOS 14 (Android 14).
+Early prototype (v0.2). Tested on an Infinix Zero 30 5G running XOS 14 (Android 14).
 
 Android does not allow regular apps to switch Wi-Fi, Bluetooth, mobile data or airplane mode
-directly, so those tiles currently open the matching system panel. Direct toggles through
-[Shizuku](https://shizuku.rikka.app/) are planned.
+directly, so without extra access those tiles open the matching system panel.
+
+With [Shizuku](https://shizuku.rikka.app/) running and access granted, OpenShade also:
+
+- toggles Wi-Fi, Bluetooth, mobile data and airplane mode with a tap
+- hides the stock quick settings panel (sets `DISABLE2_QUICK_SETTINGS`), so it never opens
+  under OpenShade. The stock notification shade keeps working, and the stock panel comes back
+  as soon as OpenShade stops.
 
 ### Roadmap
 
 - [ ] Notifications in the panel (NotificationListenerService)
-- [ ] Direct Wi-Fi / Bluetooth / mobile data toggles via Shizuku
+- [x] Direct Wi-Fi / Bluetooth / mobile data toggles via Shizuku
+- [ ] Built-in wireless debugging pairing, so Shizuku is not needed
 - [ ] Two-stage panel: compact row of tiles, then the full grid
 - [ ] Tile editor (reorder, add, remove)
 - [ ] Media player controls
