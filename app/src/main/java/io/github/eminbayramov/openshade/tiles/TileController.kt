@@ -1,4 +1,4 @@
-﻿package io.github.eminbayramov.openshade.tiles
+package io.github.eminbayramov.openshade.tiles
 
 import android.app.NotificationManager
 import android.content.Context
@@ -20,6 +20,7 @@ import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.ui.graphics.vector.ImageVector
+import io.github.eminbayramov.openshade.shell.ShizukuShell
 
 data class Tile(
     val id: String,
@@ -33,8 +34,8 @@ data class Tile(
  * Reads and toggles the state behind each quick settings tile.
  *
  * Modern Android does not let regular apps switch Wi-Fi, Bluetooth, mobile data or
- * airplane mode, so those tiles open the matching system panel. Direct toggles can be
- * added later through Shizuku.
+ * airplane mode. With Shizuku running those tiles toggle directly through a privileged
+ * shell; without it they open the matching system panel.
  */
 class TileController(private val context: Context) {
 
@@ -89,7 +90,11 @@ class TileController(private val context: Context) {
      * settings (missing permission or a toggle apps are not allowed to perform);
      * the caller starts it.
      */
-    fun toggle(id: String): Intent? {
+    fun toggle(id: String, onChanged: () -> Unit = {}): Intent? {
+        privilegedCommand(id)?.let { command ->
+            ShizukuShell.run(command) { onChanged() }
+            return null
+        }
         when (id) {
             WIFI -> return panelOr(Settings.Panel.ACTION_WIFI, Settings.ACTION_WIFI_SETTINGS)
             BLUETOOTH -> return Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
@@ -126,6 +131,26 @@ class TileController(private val context: Context) {
         ROTATE -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
         AIRPLANE -> Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS)
         else -> Intent(Settings.ACTION_SETTINGS)
+    }
+
+    /**
+     * Shell command that flips the tile, when Shizuku is available. These are the same
+     * commands Android's own `adb shell` tooling uses.
+     */
+    private fun privilegedCommand(id: String): String? {
+        if (!ShizukuShell.isReady) return null
+        fun verb(on: Boolean) = if (on) "disable" else "enable"
+        return when (id) {
+            WIFI -> "svc wifi ${verb(wifi.isWifiEnabled)}"
+            BLUETOOTH -> {
+                val v = verb(Settings.Global.getInt(resolver, Settings.Global.BLUETOOTH_ON, 0) != 0)
+                // bluetooth_manager exists from Android 13; svc bluetooth covers older versions.
+                "cmd bluetooth_manager $v || svc bluetooth $v"
+            }
+            DATA -> "svc data ${verb(Settings.Global.getInt(resolver, "mobile_data", 1) == 1)}"
+            AIRPLANE -> "cmd connectivity airplane-mode ${verb(Settings.Global.getInt(resolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1)}"
+            else -> null
+        }
     }
 
     private fun onOff(on: Boolean) = if (on) "On" else "Off"

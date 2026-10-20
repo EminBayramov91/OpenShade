@@ -27,12 +27,14 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
+import io.github.eminbayramov.openshade.shell.ShizukuShell
 import io.github.eminbayramov.openshade.tiles.BrightnessController
 import io.github.eminbayramov.openshade.tiles.TileController
 import io.github.eminbayramov.openshade.ui.ShadeActions
 import io.github.eminbayramov.openshade.ui.ShadePanel
 import io.github.eminbayramov.openshade.ui.ShadeState
 import io.github.eminbayramov.openshade.ui.shadeColors
+import rikka.shizuku.Shizuku
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -95,10 +97,13 @@ class ShadeService : AccessibilityService(), ShadeActions {
         settings.registerListener(settingsListener)
         WallpaperManager.getInstance(this).addOnColorsChangedListener(wallpaperListener, Handler(mainLooper))
         updateAppearance()
+        Shizuku.addBinderReceivedListenerSticky(shizukuListener)
         refresh()
         addPanel()
         addTrigger()
     }
+
+    private val shizukuListener = Shizuku.OnBinderReceivedListener { ShizukuShell.warmUp() }
 
     private lateinit var settings: AppSettings
     // Replaced in onServiceConnected; the service has no context yet at construction.
@@ -136,6 +141,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
             settings.unregisterListener(settingsListener)
             WallpaperManager.getInstance(this).removeOnColorsChangedListener(wallpaperListener)
         }
+        Shizuku.removeBinderReceivedListener(shizukuListener)
         removePanel()
         trigger?.let { windowManager.removeView(it) }
         trigger = null
@@ -368,7 +374,17 @@ class ShadeService : AccessibilityService(), ShadeActions {
     // region ShadeActions
 
     override fun onTileClick(id: String) {
-        tiles.toggle(id)?.let(::launch) ?: trigger?.postDelayed({ refresh() }, 250)
+        val intent = tiles.toggle(id) { trigger?.post { refresh() } }
+        if (intent != null) {
+            launch(intent)
+            return
+        }
+        // Flip the tile right away; the real state follows from refresh() once the
+        // radio has actually switched.
+        state.value = state.value.copy(
+            tiles = state.value.tiles.map { if (it.id == id) it.copy(active = !it.active) else it }
+        )
+        trigger?.postDelayed({ refresh() }, 250)
     }
 
     override fun onTileLongClick(id: String) = launch(tiles.detailsIntent(id))

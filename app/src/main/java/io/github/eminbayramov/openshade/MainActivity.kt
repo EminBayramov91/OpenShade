@@ -1,4 +1,4 @@
-﻿package io.github.eminbayramov.openshade
+package io.github.eminbayramov.openshade
 
 import android.app.NotificationManager
 import android.content.ComponentName
@@ -17,6 +17,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import io.github.eminbayramov.openshade.shell.ShizukuShell
+import rikka.shizuku.Shizuku
 import kotlin.math.roundToInt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -196,7 +198,54 @@ class MainActivity : ComponentActivity() {
                 done = getSystemService(NotificationManager::class.java).isNotificationPolicyAccessGranted,
                 action = "Allow",
             ) { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+            ShizukuStep()
         }
+    }
+
+    /** Optional: Shizuku lets the Wi-Fi, Bluetooth, mobile data and airplane tiles toggle directly. */
+    @Composable
+    private fun ShizukuStep() {
+        @Suppress("UNUSED_VARIABLE") val refresh = shizukuTick.intValue
+        val installed = runCatching { packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0) }.isSuccess
+        val status = ShizukuShell.status
+        val subtitle = "Optional. Lets Wi-Fi, Bluetooth, mobile data and airplane mode toggle with a tap " +
+            "instead of opening a settings panel. " + when {
+                !installed -> "Install Shizuku first."
+                status == ShizukuShell.Status.NOT_RUNNING -> "Open Shizuku and start it (wireless debugging or ADB)."
+                else -> ""
+            }
+        Step(
+            title = "Direct toggles with Shizuku",
+            subtitle = subtitle.trim(),
+            done = status == ShizukuShell.Status.READY,
+            action = when {
+                !installed -> "Get Shizuku"
+                status == ShizukuShell.Status.NOT_RUNNING -> "Open Shizuku"
+                else -> "Grant access"
+            },
+        ) {
+            when {
+                !installed -> startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$SHIZUKU_PACKAGE"))
+                )
+                status == ShizukuShell.Status.NOT_RUNNING ->
+                    packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)?.let(::startActivity)
+                else -> Shizuku.requestPermission(SHIZUKU_REQUEST)
+            }
+        }
+    }
+
+    private val shizukuTick = mutableIntStateOf(0)
+    private val shizukuResult = Shizuku.OnRequestPermissionResultListener { _, _ -> shizukuTick.intValue++ }
+
+    override fun onStart() {
+        super.onStart()
+        Shizuku.addRequestPermissionResultListener(shizukuResult)
+    }
+
+    override fun onStop() {
+        Shizuku.removeRequestPermissionResultListener(shizukuResult)
+        super.onStop()
     }
 
     @Composable
@@ -233,5 +282,10 @@ class MainActivity : ComponentActivity() {
         val expected = ComponentName(this, ShadeService::class.java).flattenToString()
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
         return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+    }
+
+    private companion object {
+        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
+        const val SHIZUKU_REQUEST = 1
     }
 }
