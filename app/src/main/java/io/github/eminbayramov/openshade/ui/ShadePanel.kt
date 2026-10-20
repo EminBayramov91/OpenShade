@@ -1,6 +1,7 @@
-﻿package io.github.eminbayramov.openshade.ui
+package io.github.eminbayramov.openshade.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -99,10 +100,12 @@ fun ShadePanel(
 @Composable
 private fun PanelSurface(state: ShadeState, opacity: Float, actions: ShadeActions) {
     val colors = MaterialTheme.colorScheme
+    // Fades from fully opaque (while the opening swipe is in progress) to the chosen opacity.
+    val backgroundAlpha by animateFloatAsState(opacity, tween(300), label = "panelOpacity")
     Column(
         Modifier
             .fillMaxSize()
-            .background(colors.surfaceContainer.copy(alpha = opacity))
+            .background(colors.surfaceContainer.copy(alpha = backgroundAlpha))
             // Tapping empty space closes the panel, like the stock shade.
             .clickable(remember { MutableInteractionSource() }, indication = null, onClick = actions::onDismiss)
             // Swipe up anywhere on the panel to close it.

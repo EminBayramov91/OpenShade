@@ -1,4 +1,4 @@
-﻿package io.github.eminbayramov.openshade
+package io.github.eminbayramov.openshade
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
@@ -50,6 +50,10 @@ class ShadeService : AccessibilityService(), ShadeActions {
     private var panelShown = false
 
     private val panelVisibility = MutableTransitionState(false)
+
+    // While the opening swipe is in progress the stock shade may be sliding in underneath,
+    // so the panel stays fully opaque until shortly after the finger is lifted.
+    private val fingerDown = mutableStateOf(false)
     private val state = mutableStateOf(emptyState())
 
     private val refresher = object : Runnable {
@@ -91,8 +95,15 @@ class ShadeService : AccessibilityService(), ShadeActions {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // While our panel is open, any stock shade that slipped through is closed again.
-        if (panelShown && event?.packageName == SYSTEM_UI) collapseSystemShade()
+        if (!panelShown || event == null) return
+        when (event.packageName) {
+            // Any stock shade that slipped through is closed again.
+            SYSTEM_UI -> collapseSystemShade()
+            packageName -> Unit
+            // Another app or the launcher came to the front, e.g. after the system
+            // swipe-up-for-home gesture at the bottom edge, which never reaches our window.
+            else -> if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) onDismiss()
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -126,10 +137,19 @@ class ShadeService : AccessibilityService(), ShadeActions {
                 MotionEvent.ACTION_DOWN -> {
                     startY = event.rawY
                     moved = false
+                    fingerDown.value = true
                     showPanel()
                 }
                 MotionEvent.ACTION_MOVE -> if (event.rawY - startY > threshold) moved = true
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (!moved && event.actionMasked == MotionEvent.ACTION_UP) onDismiss()
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!moved && event.actionMasked == MotionEvent.ACTION_UP) onDismiss()
+                    // The stock shade follows the finger until it is lifted, so collapse it
+                    // again now and keep the panel opaque a moment longer while it closes.
+                    for (delay in longArrayOf(0, 100, 250, 500, 900)) {
+                        view.postDelayed(::collapseSystemShade, delay)
+                    }
+                    view.postDelayed({ fingerDown.value = false }, OPAQUE_AFTER_RELEASE_MS)
+                }
             }
             true
         }
@@ -182,7 +202,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
         val compose = ComposeView(this).apply {
             setContent {
                 val look = appearance.value
-                ShadePanel(panelVisibility, state.value, look.colors, look.opacity, this@ShadeService)
+                ShadePanel(panelVisibility, state.value, look.colors, if (fingerDown.value) 1f else look.opacity, this@ShadeService)
                 // Hide the window again once the exit animation has finished.
                 if (panelVisibility.isIdle && !panelVisibility.currentState && !panelVisibility.targetState) {
                     post { hidePanelWindow() }
@@ -324,6 +344,7 @@ class ShadeService : AccessibilityService(), ShadeActions {
         const val REFRESH_MS = 1000L
         const val SYSTEM_UI = "com.android.systemui"
         const val BLUR_DP = 24
+        const val OPAQUE_AFTER_RELEASE_MS = 400L
 
         const val SHOWN_FLAGS =
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
